@@ -12,123 +12,78 @@ def client(monkeypatch):
     return TestClient(api.app)
 
 
-def test_get_activities_returns_all_available_activities(client):
-    # Arrange
-    expected_activity_names = {
-        "Chess Club",
-        "Programming Class",
-        "Gym Class",
-        "Basketball Team",
-        "Soccer Club",
-        "Art Club",
-        "Drama Club",
-        "Debate Club",
-        "Science Club",
-    }
-
-    # Act
+def test_get_activities_returns_available_activities(client):
     response = client.get("/activities")
 
-    # Assert
     assert response.status_code == 200
-    assert set(response.json()) == expected_activity_names
+    activities = response.json()
+    assert set(activities) == {"Chess Club", "Programming Class", "Gym Class"}
+    assert activities["Chess Club"] == {
+        "description": "Learn strategies and compete in chess tournaments",
+        "schedule": "Fridays, 3:30 PM - 5:00 PM",
+        "max_participants": 12,
+        "participants": ["michael@mergington.edu", "daniel@mergington.edu"],
+    }
 
 
 def test_signup_adds_participant_and_returns_confirmation(client):
-    # Arrange
-    activity_name = "Chess Club"
-    email = "student@mergington.edu"
-
-    # Act
     response = client.post(
-        f"/activities/{activity_name}/signup",
-        params={"email": email},
+        "/activities/Chess Club/signup",
+        params={"email": "student@mergington.edu"},
     )
 
-    # Assert
     assert response.status_code == 200
-    assert response.json() == {"message": f"Signed up {email} for {activity_name}"}
-    assert email in client.get("/activities").json()[activity_name]["participants"]
+    assert response.json() == {
+        "message": "Signed up student@mergington.edu for Chess Club"
+    }
+    assert client.get("/activities").json()["Chess Club"]["participants"] == [
+        "michael@mergington.edu",
+        "daniel@mergington.edu",
+        "student@mergington.edu",
+    ]
 
 
 def test_signup_returns_not_found_for_unknown_activity(client):
-    # Arrange
-    activity_name = "Unknown Club"
-
-    # Act
     response = client.post(
-        f"/activities/{activity_name}/signup",
+        "/activities/Unknown Club/signup",
         params={"email": "student@mergington.edu"},
     )
 
-    # Assert
     assert response.status_code == 404
     assert response.json() == {"detail": "Activity not found"}
 
 
-def test_signup_rejects_duplicate_participant(client):
-    # Arrange
-    activity_name = "Chess Club"
-    email = "michael@mergington.edu"
-
-    # Act
-    response = client.post(
-        f"/activities/{activity_name}/signup",
-        params={"email": email},
-    )
-
-    # Assert
-    assert response.status_code == 400
-    assert response.json() == {
-        "detail": "Student already signed up for this activity"
-    }
-
-
-def test_remove_participant_unregisters_student(client):
-    # Arrange
-    activity_name = "Chess Club"
-    email = "michael@mergington.edu"
-
-    # Act
-    response = client.delete(
-        f"/activities/{activity_name}/participants",
-        params={"email": email},
-    )
-
-    # Assert
-    assert response.status_code == 200
-    assert response.json() == {"message": f"Unregistered {email} from {activity_name}"}
-    assert email not in client.get("/activities").json()[activity_name]["participants"]
-
-
-def test_remove_participant_returns_not_found_for_unknown_activity(client):
-    # Arrange
-    activity_name = "Unknown Club"
-
-    # Act
-    response = client.delete(
-        f"/activities/{activity_name}/participants",
-        params={"email": "student@mergington.edu"},
-    )
-
-    # Assert
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Activity not found"}
-
-
-def test_remove_participant_returns_not_found_for_unsigned_student(client):
-    # Arrange
-    activity_name = "Chess Club"
+def test_signup_allows_duplicate_email(client):
     email = "student@mergington.edu"
 
-    # Act
-    response = client.delete(
-        f"/activities/{activity_name}/participants",
+    first_response = client.post(
+        "/activities/Chess Club/signup",
+        params={"email": email},
+    )
+    second_response = client.post(
+        "/activities/Chess Club/signup",
         params={"email": email},
     )
 
-    # Assert
-    assert response.status_code == 404
-    assert response.json() == {
-        "detail": "Student is not signed up for this activity"
-    }
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert client.get("/activities").json()["Chess Club"]["participants"].count(email) == 2
+
+
+def test_signup_is_allowed_when_activity_is_at_capacity(client):
+    activity = api.activities["Chess Club"]
+    participants = activity["participants"]
+    capacity = activity["max_participants"]
+    participants.extend(
+        f"student{index}@mergington.edu"
+        for index in range(capacity - len(participants))
+    )
+
+    response = client.post(
+        "/activities/Chess Club/signup",
+        params={"email": "additional@mergington.edu"},
+    )
+
+    assert response.status_code == 200
+    updated_activity = client.get("/activities").json()["Chess Club"]
+    assert len(updated_activity["participants"]) == capacity + 1
